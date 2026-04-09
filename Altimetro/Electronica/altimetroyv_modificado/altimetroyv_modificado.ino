@@ -48,7 +48,7 @@ void setup() {
  // Configuración para desactivar el filtro en un BMP280
 bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Modo de operación */
                 Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
-                Adafruit_BMP280::SAMPLING_X16,    /* Pres. oversampling */
+                Adafruit_BMP280::SAMPLING_X4,    /* Pres. oversampling */
                 Adafruit_BMP280::FILTER_X16,      /* <--- AQUÍ SE DESACTIVA EL FILTRO */
                 Adafruit_BMP280::STANDBY_MS_1); /* Tiempo de espera */
 
