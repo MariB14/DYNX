@@ -48,7 +48,7 @@ void setup() {
  // Configuración para desactivar el filtro en un BMP280
 bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Modo de operación */
                 Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
-                Adafruit_BMP280::SAMPLING_X4,    /* Pres. oversampling */
+                Adafruit_BMP280::SAMPLING_X16,    /* Pres. oversampling */
                 Adafruit_BMP280::FILTER_X16,      /* <--- AQUÍ SE DESACTIVA EL FILTRO */
                 Adafruit_BMP280::STANDBY_MS_1); /* Tiempo de espera */
 
@@ -95,17 +95,13 @@ Serial.print("Altura inicial: ");
   if (AltCohete > AltMax  ){
     AltMax = AltCohete;
     if (AltMax>2){
+      
   Tiempof=(myTime - Tiempo0);
 velocidad=((AltMax*1000)/(Tiempof-15000));
     }
   
      }
-if(AltMax > 0 ){
 
-      if((AltCohete-factor) <AltMax){
-
-  }
-  }
 
 
   display.clearDisplay();
