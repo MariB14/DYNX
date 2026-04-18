@@ -1,0 +1,78 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Python tooling
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+pip-wheel-metadata/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Node / React
+**/node_modules/
+**/dist/
+**/build/
+**/.cache/
+**/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs and runtime
+*.log
+*.pid
+
+# C / C++ / Arduino build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.out
+*.exe
+*.elf
+*.hex
+*.eep
+*.bin
+*.map
+*.d
+*.slo
+*.lo
+
+# Project-specific build dirs/binaries
+rocket_c/build/
+rocket_c/rocket_sensors
+receptor_arudino/build/
+receptor_arudino/.pio/
+receptor_arudino/.piolibdeps/
+arduino_build_*/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

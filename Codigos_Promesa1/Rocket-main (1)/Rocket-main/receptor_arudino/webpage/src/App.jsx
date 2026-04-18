@@ -1,0 +1,507 @@
+import { useEffect, useState } from 'react';
+import SensorCard from './components/SensorCard.jsx';
+import AxisTrackChart from './components/AxisTrackChart.jsx';
+import ValueBarChart from './components/ValueBarChart.jsx';
+import OrientationVisualizer from './components/OrientationVisualizer.jsx';
+import UwUCard from './components/UwUCard.jsx';
+import CommandTerminal from './components/CommandTerminal.jsx';
+import SerialMonitor from './components/SerialMonitor.jsx';
+import initialPayload from '../lora_payload_sample.json';
+import logo from './assets/logo.png';
+
+const ensureTrailingSlash = (value) => (value.endsWith('/') ? value : `${value}/`);
+
+const resolvePublicAsset = (fileName) => {
+  const base = ensureTrailingSlash(import.meta.env.BASE_URL ?? './');
+  const fallback = `${base}${fileName}`;
+
+  if (typeof window === 'undefined' || !window.location?.href || window.location.href === 'about:blank') {
+    return fallback;
+  }
+
+  try {
+    return new URL(fileName, window.location.href).href;
+  } catch (error) {
+    console.warn(`No se pudo resolver la ruta de ${fileName}:`, error);
+    return fallback;
+  }
+};
+
+const backgroundUrl = resolvePublicAsset('background.jpg');
+const logoUrl = logo;
+
+const formatTimestamp = (iso) => {
+  if (!iso) return 'Sin dato';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? 'Formato inválido' : date.toLocaleString();
+};
+
+const asObject = (value) => (value && typeof value === 'object' ? value : {});
+
+const ensureTelemetryShape = (payload) => {
+  const base = asObject(payload);
+  return {
+    ...base,
+    sensors: { ...asObject(base.sensors) },
+  };
+};
+
+const mergeTelemetrySnapshot = (current, incoming) => {
+  if (!incoming || typeof incoming !== 'object') {
+    return ensureTelemetryShape(current);
+  }
+  const safeCurrent = ensureTelemetryShape(current);
+  const safeIncoming = ensureTelemetryShape(incoming);
+  return {
+    ...safeCurrent,
+    ...safeIncoming,
+    sensors: {
+      ...safeCurrent.sensors,
+      ...safeIncoming.sensors,
+    },
+  };
+};
+
+const sanitizeMpuSnapshot = (candidate = {}) => ({
+  timestamp: candidate?.timestamp ?? null,
+  accel_g: {
+    ax: candidate?.accel_g?.ax ?? null,
+    ay: candidate?.accel_g?.ay ?? null,
+    az: candidate?.accel_g?.az ?? null,
+  },
+  gyro_dps: {
+    gx: candidate?.gyro_dps?.gx ?? null,
+    gy: candidate?.gyro_dps?.gy ?? null,
+    gz: candidate?.gyro_dps?.gz ?? null,
+  },
+  attitude_deg: {
+    pitch: candidate?.attitude_deg?.pitch ?? null,
+    roll: candidate?.attitude_deg?.roll ?? null,
+    yaw: candidate?.attitude_deg?.yaw ?? null,
+  },
+});
+
+const sanitizeNeoSnapshot = (candidate = {}) => ({
+  timestamp: candidate?.timestamp ?? null,
+  latitude: candidate?.latitude ?? null,
+  longitude: candidate?.longitude ?? null,
+  altitude: candidate?.altitude ?? null,
+  fix_time: candidate?.fix_time ?? null,
+  raw: candidate?.raw ?? null,
+});
+
+function App() {
+  const [telemetry, setTelemetry] = useState(() => ensureTelemetryShape(initialPayload));
+  const [isReady, setIsReady] = useState(false);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isSerialMonitorOpen, setIsSerialMonitorOpen] = useState(false);
+  const [serialLines, setSerialLines] = useState([]);
+  const [connectionStatus, setConnectionStatus] = useState({
+    variant: 'info',
+    message: 'Vista precargada. Conecta el receptor para recibir datos en vivo.',
+  });
+  const [lastPacketAt, setLastPacketAt] = useState(initialPayload?.reported_at ?? null);
+  const [lastTopic, setLastTopic] = useState(initialPayload?._meta?.topic ?? null);
+  const sensors = telemetry?.sensors ?? {};
+  const reportedAt = telemetry?.reported_at ?? null;
+  const mpu6050 = sanitizeMpuSnapshot(sensors.mpu6050);
+  const neo6m = sanitizeNeoSnapshot(sensors.neo6m);
+
+  const toFixed = (value, decimals = 2) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return '—';
+    }
+    return value.toFixed(decimals);
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    let readyTimeout;
+    const pendingListeners = [];
+
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.setProperty('--body-bg-image', `url("${backgroundUrl}")`);
+    }
+
+    const waitForWindow = new Promise((resolve) => {
+      if (document.readyState === 'complete') {
+        resolve();
+        return;
+      }
+
+      const handler = () => resolve();
+      window.addEventListener('load', handler, { once: true });
+      pendingListeners.push(() => window.removeEventListener('load', handler));
+    });
+
+    const waitForBackground = new Promise((resolve) => {
+      const img = new Image();
+      let settled = false;
+
+      const settle = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (img.decode) {
+          img
+            .decode()
+            .catch(() => undefined)
+            .finally(resolve);
+        } else {
+          resolve();
+        }
+      };
+
+      const onLoad = () => settle();
+      const onError = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
+
+      img.addEventListener('load', onLoad, { once: true });
+      img.addEventListener('error', onError, { once: true });
+      pendingListeners.push(() => {
+        img.removeEventListener('load', onLoad);
+        img.removeEventListener('error', onError);
+      });
+
+      img.src = backgroundUrl;
+
+      if (img.complete) {
+        if (img.naturalWidth > 0) {
+          settle();
+        } else {
+          onError();
+        }
+      }
+    });
+
+    Promise.all([waitForWindow, waitForBackground]).then(() => {
+      if (!isMounted) {
+        return;
+      }
+
+      const reveal = () => {
+        readyTimeout = window.setTimeout(() => {
+          if (isMounted) {
+            setIsReady(true);
+          }
+        }, 120);
+      };
+
+      if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(() => {
+          if (!isMounted) {
+            return;
+          }
+          window.requestAnimationFrame(() => {
+            if (!isMounted) {
+              return;
+            }
+            reveal();
+          });
+        });
+      } else {
+        reveal();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      pendingListeners.forEach((unsubscribe) => unsubscribe());
+      if (readyTimeout) {
+        window.clearTimeout(readyTimeout);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const bridge = window?.telemetryBridge;
+    if (!bridge) {
+      return undefined;
+    }
+
+    const unsubscribeFns = [];
+
+    if (bridge.onPayload) {
+      unsubscribeFns.push(
+        bridge.onPayload((incoming) => {
+          if (!incoming || typeof incoming !== 'object') {
+            return;
+          }
+          setTelemetry((prev) => mergeTelemetrySnapshot(prev, incoming));
+          const receivedAt = incoming?._meta?.received_at ?? incoming?.reported_at ?? new Date().toISOString();
+          setLastPacketAt(receivedAt);
+          setLastTopic(incoming?._meta?.topic ?? incoming?.topic ?? null);
+          const topicLabel = incoming?._meta?.topic ?? incoming?.topic;
+          setConnectionStatus({
+            variant: 'success',
+            message: topicLabel ? `Paquete en vivo (${topicLabel}) recibido.` : 'Paquete en vivo recibido.',
+          });
+        }),
+      );
+    }
+
+    if (bridge.onBridgeError) {
+      unsubscribeFns.push(
+        bridge.onBridgeError((payload) => {
+          const message = payload?.message || 'Error inesperado en el puerto serial.';
+          setConnectionStatus({ variant: 'error', message });
+        }),
+      );
+    }
+
+    if (bridge.onBridgeStopped) {
+      unsubscribeFns.push(
+        bridge.onBridgeStopped(() => {
+          setConnectionStatus({
+            variant: 'warning',
+            message: 'La conexión serial se detuvo. Reintenta desde el selector de puertos.',
+          });
+        }),
+      );
+    }
+
+    return () => {
+      unsubscribeFns.forEach((unsubscribe) => {
+        try {
+          unsubscribe?.();
+        } catch {
+          // ignore
+        }
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const bridge = window?.telemetryBridge;
+    if (!bridge?.onSerialLine) {
+      return undefined;
+    }
+
+    const unsubscribe = bridge.onSerialLine((payload) => {
+      if (!payload) {
+        return;
+      }
+
+      const text = payload.trimmed ?? payload.text ?? payload.line ?? payload.raw ?? '';
+      if (!text.trim()) {
+        return;
+      }
+
+      setSerialLines((prev) => {
+        const entry = {
+          text,
+          timestamp: payload.timestamp ?? new Date().toISOString(),
+        };
+        const next = [...prev, entry];
+        if (next.length > 250) {
+          next.splice(0, next.length - 250);
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const isCombo = event.ctrlKey || event.metaKey;
+      if (!isCombo || !event.key) {
+        return;
+      }
+
+      const target = event.target;
+      const isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+
+      if (isEditable) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === 't') {
+        event.preventDefault();
+        setIsTerminalOpen(true);
+        return;
+      }
+
+      if (key === 's') {
+        event.preventDefault();
+        setIsSerialMonitorOpen(true);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const handleClearSerialLines = () => {
+    setSerialLines([]);
+  };
+
+  const bannerVariant = connectionStatus.variant ?? 'info';
+  const statusMessage = connectionStatus.message ?? 'Esperando telemetría en vivo…';
+  const lastPacketMeta = lastPacketAt
+    ? `Último paquete: ${formatTimestamp(lastPacketAt)}${lastTopic ? ` · ${lastTopic}` : ''}`
+    : 'Aún no se reciben paquetes desde el receptor.';
+
+  return (
+    <div className="app-shell">
+      {!isReady && (
+        <div className="splash-screen" role="status" aria-live="polite">
+          <div className="splash__logo-wrap">
+            <img src={logoUrl} alt="Logotipo del programa Dynx" />
+            <span className="splash__ring" aria-hidden />
+          </div>
+          <p className="splash__label">Inicializando telemetría…</p>
+        </div>
+      )}
+
+      <div className={`app ${isReady ? 'app--ready' : 'app--loading'}`}>
+        <div className={`connection-banner connection-banner--${bannerVariant}`}>
+          <span className="connection-banner__pulse" aria-hidden />
+          <div className="connection-banner__content">
+            <p className="connection-banner__label">{statusMessage}</p>
+            <p className="connection-banner__meta">{lastPacketMeta}</p>
+          </div>
+        </div>
+        <main className="app__content">
+          <div className="sensor-grid">
+            <SensorCard
+              id="mpu6050"
+              title="MPU6050"
+              subtitle={`Capturado el ${formatTimestamp(mpu6050.timestamp)}`}
+            >
+              <div className="charts-grid charts-grid--mpu">
+                <OrientationVisualizer
+                  pitch={mpu6050.attitude_deg.pitch}
+                  roll={mpu6050.attitude_deg.roll}
+                  yaw={mpu6050.attitude_deg.yaw}
+                />
+                <AxisTrackChart
+                  title="Acelerómetro (g)"
+                  unit="g"
+                  min={-4}
+                  max={4}
+                  data={[
+                    { label: 'X', value: mpu6050.accel_g.ax },
+                    { label: 'Y', value: mpu6050.accel_g.ay },
+                    { label: 'Z', value: mpu6050.accel_g.az },
+                  ]}
+                  decimals={3}
+                />
+                <AxisTrackChart
+                  title="Giroscopio (°/s)"
+                  unit="°/s"
+                  min={-500}
+                  max={500}
+                  data={[
+                    { label: 'X', value: mpu6050.gyro_dps.gx },
+                    { label: 'Y', value: mpu6050.gyro_dps.gy },
+                    { label: 'Z', value: mpu6050.gyro_dps.gz },
+                  ]}
+                  decimals={2}
+                />
+                <AxisTrackChart
+                  title="Actitud (°)"
+                  unit="°"
+                  min={-180}
+                  max={180}
+                  data={[
+                    { label: 'Pitch', value: mpu6050.attitude_deg.pitch },
+                    { label: 'Roll', value: mpu6050.attitude_deg.roll },
+                    { label: 'Yaw', value: mpu6050.attitude_deg.yaw },
+                  ]}
+                  decimals={2}
+                />
+              </div>
+            </SensorCard>
+
+            <SensorCard
+              id="neo6m"
+              title="NEO-6M"
+              subtitle={`Capturado el ${formatTimestamp(neo6m.timestamp)}`}
+            >
+              <div className="geo-panel">
+                <div className="geo-panel__summary">
+                  <div className="geo-panel__coordinates">
+                    <div className="geo-panel__slot">
+                      <span className="geo-panel__label">Latitud</span>
+                      <span className="geo-panel__value">{neo6m.latitude}</span>
+                    </div>
+                    <div className="geo-panel__slot">
+                      <span className="geo-panel__label">Longitud</span>
+                      <span className="geo-panel__value">{neo6m.longitude}</span>
+                    </div>
+                  </div>
+                  <div className="geo-panel__altitude">
+                    <ValueBarChart
+                      title="Altitud"
+                      value={neo6m.altitude}
+                      min={0}
+                      max={2000}
+                      unit="m"
+                      decimals={1}
+                      target={1000}
+                      targetLabel="1 km"
+                    />
+                  </div>
+                  <dl className="geo-panel__meta">
+                    <div>
+                      <dt>Fix</dt>
+                      <dd>{formatTimestamp(neo6m.fix_time)}</dd>
+                    </div>
+                    <div>
+                      <dt>Cadena NMEA</dt>
+                      <dd>
+                        <code className="nmea">{neo6m.raw}</code>
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </SensorCard>
+
+            <UwUCard />
+          </div>
+        </main>
+      </div>
+      <CommandTerminal
+        open={isTerminalOpen}
+        onClose={() => setIsTerminalOpen(false)}
+        mpu6050={mpu6050}
+        neo6m={neo6m}
+        reportedAt={reportedAt}
+      />
+      <SerialMonitor
+        open={isSerialMonitorOpen}
+        lines={serialLines}
+        onClose={() => setIsSerialMonitorOpen(false)}
+        onClear={handleClearSerialLines}
+      />
+    </div>
+  );
+}
+
+export default App;
