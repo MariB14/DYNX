@@ -1,0 +1,80 @@
+Bitacora
+Son las 3 am
+No tengo mucha idea como usar este sensor
+
+Estaba viendo un tutorial pero no entiendo muy bien las lineas de codigo
+Ademas esta cosa te da coordenadas asi que creo que tendré 
+que usar alguna manera de traducirlas a algo mas sencillo
+
+Por ahora tambien pregunte a chatgpt y debo recordar 
+que hay que configurar esto en la terminal antes 
+de usar el modulo:
+
+sudo raspi-config
+
+Interface Options → Serial Port:
+
+¿Login shell por serial? → No
+
+¿Habilitar hardware serial? → Yes
+
+sudo apt update
+sudo apt install python3-serial gpsd gpsd-clients python3-gps
+
+-------------------------empieza aqui santi ------------------------------------------
+
+Conexión segun documentación:
+VCC-3.3v 
+GND- pues GND
+TX-GPIO15 (UART RX) 
+RX - GPIO14(UART TX)
+
+
+sudo nano /boot/config.txt
+
+ahi copio esto:
+
+dtparam=spi=on
+dtoverlay=pi3-disable-bt
+core_freq=250
+enable_uart=1
+force_turbo=1
+
+
+luego me salgo
+
+sudo nano /boot/cmdline.txt
+
+lo que salga ahi lo reemplazo con esto
+
+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet splash plymouth.ignore-serial-consoles
+
+y reinicio
+
+aqui checo el modulo, el foquito
+
+si funciona hago esto:
+
+
+sudo cat /dev/ttyAMA0
+
+(o cambio el ttyAMA0 con serial* creo)
+
+y aqui deben aparecer coordenadas
+
+ls -l /dev
+
+sudo systemctl stop serial-getty@ttyAMA0.service
+sudo systemctl disable serial-getty@ttyAMA0.service
+
+o
+
+sudo systemctl stop serial-getty@ttyS0.service
+sudo systemctl disable serial-getty@ttyS0.service
+
+
+luego
+
+pip install pynmea2
+
+aqui pongo el codigo

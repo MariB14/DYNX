@@ -1,0 +1,15 @@
+import time
+import board
+import busio
+import adafruit_bmp280
+
+i2c = busio.I2C(board.SCL, board.SDA)
+
+try:
+    bmp280 = adafruit_bmp280.Adafruit_BMP280_I2C(i2c, address=0x76)
+except ValueError:
+    bmp280 = adafruit_bmp280.Adafruit_BMP280_I2C(i2c, address=0x77)
+
+while True:
+    print(f"{bmp280.pressure:.2f} hPa")
+    time.sleep(2)
