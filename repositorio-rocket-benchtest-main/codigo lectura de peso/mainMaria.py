@@ -5,6 +5,11 @@ import spidev, RPi.GPIO as GPIO, time, sys, termios, tty, select, csv, os
 from collections import deque
 import math
 import json
+import threading
+import matplotlib
+matplotlib.use('Qt5Agg')  # funciona bien en Raspberry Pi con Qt
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 # ==============================
 # CONFIGURACIÓN DE PINES / SPI
@@ -366,7 +371,7 @@ def calibracion_automatica():
 # MODO 2: PRUEBA CON IGNICIÓN
 # ==============================
 def modo_prueba():
-    """Modo de prueba con countdown e ignición"""
+    """Modo de prueba con countdown e ignición + gráfica en tiempo real"""
     config = load_config()
     
     print("\n" + "="*60)
@@ -452,104 +457,234 @@ def modo_prueba():
     print("🔥 INICIANDO PRUEBA EN 3 SEGUNDOS...")
     print("="*60)
     time.sleep(3)
-    
+
+    # ── Buffers compartidos hilo <-> gráfica ──────────────────
+    datos_t       = []
+    datos_fuerza  = []
+    datos_voltaje = []
+    ignicion_t    = None   # momento exacto de ignición
+    fin_relay_t   = None   # momento de apagado
+    lock          = threading.Lock()
+    prueba_fin    = threading.Event()
+
     relay_activado = False
-    relay_apagado = False  # Nueva bandera para evitar múltiples prints
-    
+    relay_apagado  = False
+
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     filename = f"thrust_test_{timestamp}.csv"
-    
-    try:
-        with open(filename, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["tiempo_s", "raw", "delta", "voltaje_mV", 
-                           "fuerza_kgf", "relay_status", "GAIN", "SPS"])
-            
-            start_time = time.time()
-            
-            print("\n⏺️  GRABANDO DATOS...")
-            print("Presiona Ctrl+C para detener manualmente\n")
-            
-            while True:
-                t = time.time() - start_time
-                
-                # Verificar si terminar
-                if t >= duracion_total:
-                    break
-                
-                # CONTROL DEL RELAY - VERSIÓN CORREGIDA
-                tiempo_fin_relay = timer_ignicion + duracion_relay
-                
-                if t >= timer_ignicion and t < tiempo_fin_relay:
-                    # Periodo de activación
-                    if not relay_activado:
-                        print(f"\n{'🔥'*20}")
-                        print(f"⚡ IGNICIÓN ACTIVADA - t={t:.2f}s")
-                        print(f"⚡ Relay permanecerá activo hasta t={tiempo_fin_relay:.2f}s")
-                        print(f"{'🔥'*20}\n")
-                        relay_activado = True
-                    GPIO.output(RELAY_PIN, GPIO.LOW)
-                else:
-                    # Fuera del periodo de activación
-                    if relay_activado and not relay_apagado:
-                        GPIO.output(RELAY_PIN, GPIO.HIGH)
-                        print(f"\n{'⚠️ '*20}")
-                        print(f"⚠️  RELAY APAGADO - t={t:.2f}s")
-                        print(f"{'⚠️ '*20}\n")
-                        relay_apagado = True
-                    elif not relay_activado:
-                        GPIO.output(RELAY_PIN, GPIO.HIGH)
-                
-                # Leer datos
-                adc.set_diff_ch()
-                raw = adc.read_data()
-                delta = raw - raw_zero
-                mv = code_to_mV(delta, gain, vref)
-                
-                # Filtros
-                history.append(mv)
-                mv_med = median3(history)
-                ema_val = alpha * mv_med + (1 - alpha) * ema_val
-                
-                # Convertir a fuerza
-                fuerza_kgf = ema_val * calibration_factor
-                
-                # Estado relay
-                relay_status = "ON" if GPIO.input(RELAY_PIN) == GPIO.LOW else "OFF"
-                
-                # Guardar y mostrar
-                writer.writerow([f"{t:.3f}", raw, delta, f"{ema_val:.6f}", 
-                               f"{fuerza_kgf:.6f}", relay_status, gain, drate])
-                
-                # Display con countdown visual
-                if t < timer_ignicion:
-                    countdown = timer_ignicion - t
-                    print(f"⏳ t={t:6.2f}s | COUNTDOWN: {countdown:5.1f}s | "
-                          f"V={ema_val:8.3f}mV | F={fuerza_kgf:9.2f}kgf | "
-                          f"Relay={relay_status}", end='\r')
-                else:
-                    print(f"🚀 t={t:6.2f}s | Raw={raw:7d} | Δ={delta:7d} | "
-                          f"V={ema_val:8.3f}mV | F={fuerza_kgf:9.2f}kgf | "
-                          f"Relay={relay_status}", end='\r')
-                
-                time.sleep(0.01)
-        
-        # Asegurar relay apagado
-        GPIO.output(RELAY_PIN, GPIO.HIGH)
-        
-        print(f"\n\n✅ PRUEBA COMPLETADA")
-        print(f"📁 Datos guardados en: {filename}")
-        print(f"⏱️  Duración: {duracion_total}s")
-        
-    except KeyboardInterrupt:
-        GPIO.output(RELAY_PIN, GPIO.HIGH)
-        print(f"\n\n⚠️  PRUEBA INTERRUMPIDA (Ctrl+C)")
-        print(f"📁 Datos parciales en: {filename}")
-    except Exception as e:
-        GPIO.output(RELAY_PIN, GPIO.HIGH)
-        print(f"\n\n❌ ERROR: {e}")
-        print(f"📁 Datos parciales en: {filename}")
-    
+
+    # ── Hilo de adquisición ───────────────────────────────────
+    def adquisicion():
+        nonlocal ema_val, relay_activado, relay_apagado
+        nonlocal ignicion_t, fin_relay_t
+
+        try:
+            with open(filename, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["tiempo_s", "raw", "delta", "voltaje_mV",
+                                 "fuerza_kgf", "relay_status", "GAIN", "SPS"])
+
+                start_time = time.time()
+
+                print("\n⏺️  GRABANDO DATOS...")
+                print("Presiona Ctrl+C para detener manualmente\n")
+
+                while True:
+                    t = time.time() - start_time
+
+                    # Verificar si terminar
+                    if t >= duracion_total:
+                        break
+
+                    # CONTROL DEL RELAY
+                    tiempo_fin_relay = timer_ignicion + duracion_relay
+
+                    if t >= timer_ignicion and t < tiempo_fin_relay:
+                        if not relay_activado:
+                            print(f"\n{'🔥'*20}")
+                            print(f"⚡ IGNICIÓN ACTIVADA - t={t:.2f}s")
+                            print(f"⚡ Relay permanecerá activo hasta t={tiempo_fin_relay:.2f}s")
+                            print(f"{'🔥'*20}\n")
+                            relay_activado = True
+                            ignicion_t = t
+                        GPIO.output(RELAY_PIN, GPIO.LOW)
+                    else:
+                        if relay_activado and not relay_apagado:
+                            GPIO.output(RELAY_PIN, GPIO.HIGH)
+                            print(f"\n{'⚠️ '*20}")
+                            print(f"⚠️  RELAY APAGADO - t={t:.2f}s")
+                            print(f"{'⚠️ '*20}\n")
+                            relay_apagado = True
+                            fin_relay_t = t
+                        elif not relay_activado:
+                            GPIO.output(RELAY_PIN, GPIO.HIGH)
+
+                    # Leer datos
+                    adc.set_diff_ch()
+                    raw = adc.read_data()
+                    delta = raw - raw_zero
+                    mv = code_to_mV(delta, gain, vref)
+
+                    # Filtros
+                    history.append(mv)
+                    mv_med = median3(history)
+                    ema_val = alpha * mv_med + (1 - alpha) * ema_val
+
+                    # Convertir a fuerza
+                    fuerza_kgf = ema_val * calibration_factor
+
+                    # Estado relay
+                    relay_status = "ON" if GPIO.input(RELAY_PIN) == GPIO.LOW else "OFF"
+
+                    # Guardar CSV
+                    writer.writerow([f"{t:.3f}", raw, delta, f"{ema_val:.6f}",
+                                     f"{fuerza_kgf:.6f}", relay_status, gain, drate])
+
+                    # Agregar a buffers (thread-safe)
+                    with lock:
+                        datos_t.append(t)
+                        datos_fuerza.append(fuerza_kgf)
+                        datos_voltaje.append(ema_val)
+
+                    # Display con countdown visual
+                    if t < timer_ignicion:
+                        countdown = timer_ignicion - t
+                        print(f"⏳ t={t:6.2f}s | COUNTDOWN: {countdown:5.1f}s | "
+                              f"V={ema_val:8.3f}mV | F={fuerza_kgf:9.2f}kgf | "
+                              f"Relay={relay_status}", end='\r')
+                    else:
+                        print(f"🚀 t={t:6.2f}s | Raw={raw:7d} | Δ={delta:7d} | "
+                              f"V={ema_val:8.3f}mV | F={fuerza_kgf:9.2f}kgf | "
+                              f"Relay={relay_status}", end='\r')
+
+                    time.sleep(0.01)
+
+            # Asegurar relay apagado
+            GPIO.output(RELAY_PIN, GPIO.HIGH)
+            print(f"\n\n✅ PRUEBA COMPLETADA")
+            print(f"📁 Datos guardados en: {filename}")
+            print(f"⏱️  Duración: {duracion_total}s")
+
+        except KeyboardInterrupt:
+            GPIO.output(RELAY_PIN, GPIO.HIGH)
+            print(f"\n\n⚠️  PRUEBA INTERRUMPIDA (Ctrl+C)")
+            print(f"📁 Datos parciales en: {filename}")
+        except Exception as e:
+            GPIO.output(RELAY_PIN, GPIO.HIGH)
+            print(f"\n\n❌ ERROR: {e}")
+            print(f"📁 Datos parciales en: {filename}")
+        finally:
+            prueba_fin.set()
+
+    # ── Configurar gráfica ────────────────────────────────────
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    fig.patch.set_facecolor('#0f0f1a')
+    for ax in (ax1, ax2):
+        ax.set_facecolor('#1a1a2e')
+        ax.tick_params(colors='white')
+        ax.xaxis.label.set_color('white')
+        ax.yaxis.label.set_color('white')
+        ax.title.set_color('white')
+        for spine in ax.spines.values():
+            spine.set_edgecolor('#444')
+
+    ax1.set_title("Fuerza de Empuje", fontsize=11, fontweight='bold')
+    ax1.set_ylabel("kgf", color='white')
+    ax1.grid(True, color='#333', linestyle='--', linewidth=0.5)
+
+    ax2.set_title("Voltaje ADC (filtrado)", fontsize=11, fontweight='bold')
+    ax2.set_ylabel("mV", color='white')
+    ax2.set_xlabel("Tiempo (s)", color='white')
+    ax2.grid(True, color='#333', linestyle='--', linewidth=0.5)
+
+    linea_f, = ax1.plot([], [], color='#00e5ff', linewidth=1.5, label='Fuerza kgf')
+    linea_v, = ax2.plot([], [], color='#ff6b35', linewidth=1.5, label='Voltaje mV')
+
+    # Líneas verticales de eventos (ignición / fin relay)
+    vline_ign1 = ax1.axvline(x=0, color='#ff0055', linewidth=1.5,
+                              linestyle='--', visible=False, label='Ignición')
+    vline_ign2 = ax2.axvline(x=0, color='#ff0055', linewidth=1.5,
+                              linestyle='--', visible=False)
+    vline_fin1 = ax1.axvline(x=0, color='#ffaa00', linewidth=1.5,
+                              linestyle='--', visible=False, label='Fin relay')
+    vline_fin2 = ax2.axvline(x=0, color='#ffaa00', linewidth=1.5,
+                              linestyle='--', visible=False)
+
+    ax1.legend(loc='upper left', facecolor='#222', labelcolor='white', fontsize=8)
+
+    # Texto de estado en la gráfica
+    txt_estado = fig.text(0.5, 0.97, "⏳ Esperando ignición...",
+                          ha='center', va='top', color='white',
+                          fontsize=10, fontweight='bold')
+
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+    def actualizar(frame):
+        with lock:
+            if not datos_t:
+                return linea_f, linea_v
+
+            t_arr = list(datos_t)
+            f_arr = list(datos_fuerza)
+            v_arr = list(datos_voltaje)
+
+        linea_f.set_data(t_arr, f_arr)
+        linea_v.set_data(t_arr, v_arr)
+
+        t_actual = t_arr[-1]
+
+        # Escalar ejes automáticamente
+        ax1.set_xlim(0, max(duracion_total, t_actual + 1))
+        if f_arr:
+            margen = max(abs(max(f_arr, default=0)), abs(min(f_arr, default=0))) * 0.2 + 0.01
+            ax1.set_ylim(min(f_arr) - margen, max(f_arr) + margen)
+        if v_arr:
+            margen = max(abs(max(v_arr, default=0)), abs(min(v_arr, default=0))) * 0.2 + 0.01
+            ax2.set_ylim(min(v_arr) - margen, max(v_arr) + margen)
+
+        # Mostrar línea de ignición
+        if ignicion_t is not None:
+            vline_ign1.set_xdata([ignicion_t, ignicion_t])
+            vline_ign2.set_xdata([ignicion_t, ignicion_t])
+            vline_ign1.set_visible(True)
+            vline_ign2.set_visible(True)
+
+        # Mostrar línea de fin relay
+        if fin_relay_t is not None:
+            vline_fin1.set_xdata([fin_relay_t, fin_relay_t])
+            vline_fin2.set_xdata([fin_relay_t, fin_relay_t])
+            vline_fin1.set_visible(True)
+            vline_fin2.set_visible(True)
+
+        # Texto de estado
+        if prueba_fin.is_set():
+            txt_estado.set_text("✅ Prueba completada")
+            txt_estado.set_color('#00ff88')
+        elif ignicion_t is not None and fin_relay_t is None:
+            txt_estado.set_text(f"🔥 COMBUSTIÓN ACTIVA — t={t_actual:.1f}s")
+            txt_estado.set_color('#ff4444')
+        elif ignicion_t is not None:
+            txt_estado.set_text(f"📊 Post-combustión — t={t_actual:.1f}s")
+            txt_estado.set_color('#ffaa00')
+        else:
+            cd = max(0, timer_ignicion - t_actual)
+            txt_estado.set_text(f"⏳ Ignición en {cd:.1f}s")
+            txt_estado.set_color('white')
+
+        return linea_f, linea_v, vline_ign1, vline_ign2, vline_fin1, vline_fin2, txt_estado
+
+    # ── Arrancar hilo y animación ─────────────────────────────
+    hilo = threading.Thread(target=adquisicion, daemon=True)
+    hilo.start()
+
+    ani = animation.FuncAnimation(fig, actualizar, interval=100,
+                                  blit=False, cache_frame_data=False)
+
+    plt.show()   # bloquea hasta cerrar la ventana
+
+    prueba_fin.wait()   # esperar a que el hilo termine
+    hilo.join(timeout=3)
+
     input("\nPresiona ENTER para continuar...")
 
 # ==============================
