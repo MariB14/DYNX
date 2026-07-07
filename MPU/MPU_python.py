@@ -18,6 +18,14 @@ GYRO_XOUT_H  = 0x43
 GYRO_YOUT_H  = 0x45
 GYRO_ZOUT_H  = 0x47
 
+import RPi.GPIO as GPIO
+
+ledPin = 13      # pin GPIO del LED
+UMBRAL = 0.9     # umbral ~90 grados
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(ledPin, GPIO.OUT)
+GPIO.output(ledPin, GPIO.LOW)
 
 def MPU_Init():
 	#write to sample rate register
@@ -76,6 +84,17 @@ while True:
 	Gx = gyro_x/131.0
 	Gy = gyro_y/131.0
 	Gz = gyro_z/131.0
+ 
+ print ("\tX=%.2f g" %Ax, "\tY=%.2f g" %Ay, "\tZ=%.2f g" %Az)
+  print ("\tX=%.2f g" %Ax, "\tY=%.2f g" %Ay, "\tZ=%.2f g" %Az)
+
+        # --- Control LED ---
+        if abs(Ax) >= UMBRAL or abs(Ay) >= UMBRAL or abs(Az) >= UMBRAL:
+            GPIO.output(ledPin, GPIO.HIGH)
+            print('LED ACTIVADO  - Se detectaron 90 grados')
+        else:
+            GPIO.output(ledPin, GPIO.LOW)
+            print('LED APAGADO   - Sin inclinacion de 90 grados')
 	
 
 	print ("\tX=%.2f g" %Ax, "\tY=%.2f g" %Ay, "\tZ=%.2f g" %Az) 	
