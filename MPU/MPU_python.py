@@ -20,7 +20,7 @@ GYRO_ZOUT_H  = 0x47
 
 import RPi.GPIO as GPIO
 
-ledPin = 13      # pin GPIO del LED
+ledPin = 17      # pin GPIO del LED
 UMBRAL = 0.9     # umbral ~90 grados
 
 GPIO.setmode(GPIO.BCM)
