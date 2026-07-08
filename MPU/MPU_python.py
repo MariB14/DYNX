@@ -85,14 +85,14 @@ while True:
 	Gy = gyro_y/131.0
 	Gz = gyro_z/131.0
  
-print("\tX=%.2f g" %Ax, "\tY=%.2f g" %Ay, "\tZ=%.2f g" %Az)
+while True:
+    print("\tX=%.2f g" % Ax, "\tY=%.2f g" % Ay, "\tZ=%.2f g" % Az)
 
-		if abs(Ax) >= UMBRAL or abs(Ay) >= UMBRAL or abs(Az) >= UMBRAL:
-			GPIO.output(ledPin, GPIO.HIGH)
-			print('LED ACTIVADO  - Se detectaron 90 grados')
-		else:
-			GPIO.output(ledPin, GPIO.LOW)
-			print('LED APAGADO   - Sin inclinacion de 90 grados')
+    if abs(Ax) >= UMBRAL or abs(Ay) >= UMBRAL or abs(Az) >= UMBRAL:
+        GPIO.output(ledPin, GPIO.HIGH)
+        print("LED ACTIVADO - Se detectaron 90 grados")
+    else:
+        GPIO.output(ledPin, GPIO.LOW)
+        print("LED APAGADO - Sin inclinación de 90 grados")
 
-	print ("\tX=%.2f g" %Ax, "\tY=%.2f g" %Ay, "\tZ=%.2f g" %Az) 	
-	sleep(1)
+    sleep(1)
