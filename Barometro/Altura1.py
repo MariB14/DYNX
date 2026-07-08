@@ -1,22 +1,16 @@
-try:
-    from smbus2 import SMBus
-except ImportError:
-    from smbus import SMBus
-import bme280
+import time
+from smbus2 import SMbus
+from bmp280 import BMP280
 
-# Iniciando el BME280
+
+
 bus = SMBus(1)
-calibration_params = bme280.load_calibration_params(bus, 0x76)
-
-from time import sleep
-
-PRESION_NIVEL_MAR = 1013.25
+bmp280 = BMP280(i2c_dev=bus)
 
 while True:
-    data = bme280.sample(bus, 0x76, calibration_params)
-    presion     = data.pressure
-    altura      = 44330.0 * (1.0 - (presion / PRESION_NIVEL_MAR) ** 0.1903)
+    pressure = bmp280.get_pressure()
 
-    print(f"Presion:     {presion:.2f} hPa")
-    print(f"Altura:      {altura:.2f} m")
-    sleep(1)
+    presionmar = 1013.25
+    altura = 44330.8 * (1.0-(pressure/presionmar) ** 0.19026)
+    print(f"{altura}m")
+    time.sleep(1)
