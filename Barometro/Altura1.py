@@ -1,5 +1,5 @@
 import time
-from smbus2 import SMbus
+from smbus2 import SMBus
 from bmp280 import BMP280
 
 
