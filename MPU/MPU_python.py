@@ -21,7 +21,7 @@ GYRO_ZOUT_H  = 0x47
 import RPi.GPIO as GPIO
 
 ledPin = 17      # pin GPIO del LED
-UMBRAL = 0.9     # umbral ~90 grados
+UMBRAL = 90.00    # umbral ~90 grados
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(ledPin, GPIO.OUT)
@@ -77,13 +77,13 @@ while True:
     gyro_z = read_raw_data(GYRO_ZOUT_H)
 
     # Conversión
-    Ax = acc_x / 16384.0
-    Ay = acc_y / 16384.0
-    Az = acc_z / 16384.0
+    Ax = acc_x / 163.840
+    Ay = acc_y / 163.840
+    Az = acc_z / 163.840
 
-    Gx = gyro_x / 131.0
-    Gy = gyro_y / 131.0
-    Gz = gyro_z / 131.0
+    Gx = gyro_x / 1.310
+    Gy = gyro_y / 1.310
+    Gz = gyro_z / 1.310
 
     print("\tX=%.2f g" % Ax,
           "\tY=%.2f g" % Ay,
