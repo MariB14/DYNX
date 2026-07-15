@@ -12,21 +12,24 @@ GPIO.output(ledPin, GPIO.LOW)
 # Configuración del bus I2C y el sensor
 bus = SMBus(1)
 bmp280 = BMP280(i2c_dev=bus)
+pressure = bmp280.get_pressure()
+
+ # Cálculo de altitud
+presionmar = 1013.25
+altura = 44330.8 * (1.0 - (pressure / presionmar) ** 0.19026)
 
 try:
 
     while True:
+       
         pressure = bmp280.get_pressure()
-
-        # Cálculo de altitud
-        presionmar = 1013.25
-        altura = 44330.8 * (1.0 - (pressure / presionmar) ** 0.19026)
-        
+        actual = 44330.8 * (1.0 - (pressure / presionmar) ** 0.19026)
+        dif = altura-actual
         # Formatear la salida a 2 decimales para que sea más legible
-        print(f"Altitud estimada: {altura:.2f} m")
+        print(f"Altitud estimada: {dif:.2f} m")
         
         # Lógica del LED
-        if altura >= 500:
+        if dif >= 1:
             GPIO.output(ledPin, GPIO.HIGH)
             print("LED ACTIVADO")
         else:
