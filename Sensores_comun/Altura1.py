@@ -36,6 +36,10 @@ try:
             GPIO.output(ledPin, GPIO.LOW)
             print("LED APAGADO")
             
+            
+        with open('/dev/shm/altura.txt', 'w') as f:
+            f.write(str(dif)) # Asegúrate de usar el nombre de tu variable de altitud
+            
         time.sleep(1)
 
 except KeyboardInterrupt:

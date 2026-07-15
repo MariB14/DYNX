@@ -95,5 +95,9 @@ while True:
     else:
         GPIO.output(ledPin, GPIO.LOW)
         print("LED APAGADO")
+    with open('/dev/shm/imu.txt', 'w') as f:
+    # Guardamos los 3 ejes separados por comas y con 2 decimales
+    f.write(f"{Ax:.2f},{Ay:.2f},{Az:.2f}")    
+        
 
     sleep(1)
