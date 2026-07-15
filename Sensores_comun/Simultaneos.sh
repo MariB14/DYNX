@@ -2,7 +2,7 @@
 echo "Iniciando sistemas de telemetría..."
 
 # 1. Iniciar los scripts de Python en segundo plano (usando &)
-python3 MPU6050.py &
+python3 MPU_python.py &
 python3 Altura1.py &
 
 # Cuando tengas los demás listos, solo quítales el #
