@@ -4,6 +4,9 @@
 '''
 import smbus					#import SMBus module of I2C
 from time import sleep          #import
+import csv
+import os
+import time
 
 #some MPU6050 Registers and their Address
 PWR_MGMT_1   = 0x6B
@@ -64,6 +67,13 @@ MPU_Init()
 
 print (" Reading Data of Gyroscope and Accelerometer")
 
+csv_filename = 'mpu6050_datos.csv'
+
+if not os.path.exists(csv_filename):
+    with open(csv_filename, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['timestamp', 'Ax_g', 'Ay_g', 'Az_g', 'Gx_deg_s', 'Gy_deg_s', 'Gz_deg_s'])
+
 while True:
 
     # Leer acelerómetro
@@ -97,7 +107,18 @@ while True:
         print("LED APAGADO")
     with open('/dev/shm/imu.txt', 'w') as f:
     # Guardamos los 3 ejes separados por comas y con 2 decimales
-    f.write(f"{Ax:.2f},{Ay:.2f},{Az:.2f}")    
+    f.write(f"{Ax:.2f},{Ay:.2f},{Az:.2f}")   
+    
+    # Guardar registro continuo en el CSV
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        with open(csv_filename, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([timestamp, f"{Ax:.2f}", f"{Ay:.2f}", f"{Az:.2f}", f"{Gx:.2f}", f"{Gy:.2f}", f"{Gz:.2f}"]) 
         
 
+
     sleep(1)
+
+    except KeyboardInterrupt:
+    GPIO.cleanup()
+    print("\nPrograma detenido y GPIO limpiado.")
